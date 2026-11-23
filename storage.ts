@@ -1,5 +1,5 @@
 import { get, set } from "@api/DataStore";
-import { UserStore } from "@webpack/common";
+import { ChannelStore, UserStore } from "@webpack/common";
 
 import { FavoriteChannelMap, FavoriteChannelType, LocalFavoriteChannel, StoredFavoritesPayload } from "./types";
 
@@ -18,6 +18,29 @@ function getStorageKey(userId: string): string {
 
 function resolveUserId(explicitUserId?: string): string {
     return explicitUserId ?? UserStore.getCurrentUser()?.id ?? currentUserId ?? "default";
+}
+
+function normalizeNickname(nickname: string | null | undefined): string | null {
+    if (typeof nickname !== "string") return null;
+    const trimmed = nickname.trim();
+    return trimmed.length > 0 ? trimmed : null;
+}
+
+function resolveChannelType(channelId: string, explicitType?: number): number | undefined {
+    if (typeof explicitType === "number") return explicitType;
+    const ch = ChannelStore.getChannel(channelId);
+    return typeof ch?.type === "number" ? ch.type : undefined;
+}
+
+function normalizeEntry(id: string, raw: Partial<LocalFavoriteChannel>, fallbackOrder: number): LocalFavoriteChannel {
+    return {
+        id,
+        nickname: normalizeNickname(raw.nickname),
+        type: typeof raw.type === "number" ? raw.type : FavoriteChannelType.REFERENCE_ORIGINAL,
+        channelType: resolveChannelType(id, raw.channelType),
+        order: typeof raw.order === "number" ? raw.order : fallbackOrder,
+        parentId: typeof raw.parentId === "string" && raw.parentId.length > 0 ? raw.parentId : null,
+    };
 }
 
 function notifyListeners(): void {
@@ -50,7 +73,13 @@ export async function loadFavorites(explicitUserId?: string): Promise<FavoriteCh
 
     const stored = await get<StoredFavoritesPayload>(getStorageKey(userId));
     if (stored && stored.version === 1 && stored.favorites && typeof stored.favorites === "object") {
-        cache = { ...stored.favorites };
+        const normalized: FavoriteChannelMap = {};
+        let idx = 0;
+        for (const [id, raw] of Object.entries(stored.favorites)) {
+            if (!id || !raw || typeof raw !== "object") continue;
+            normalized[id] = normalizeEntry(id, raw, idx++);
+        }
+        cache = normalized;
     } else {
         cache = {};
     }
@@ -97,17 +126,21 @@ function getNextOrder(): number {
 export async function addLocalFavorite(
     channelId: string,
     options?: {
-        nickname?: string;
+        nickname?: string | null;
         parentId?: string | null;
         type?: FavoriteChannelType;
+        channelType?: number;
         order?: number;
     }
 ): Promise<LocalFavoriteChannel> {
     const existing = cache[channelId];
     const entry: LocalFavoriteChannel = {
         id: channelId,
-        nickname: options?.nickname ?? existing?.nickname ?? "",
+        nickname: options?.nickname !== undefined
+            ? normalizeNickname(options.nickname)
+            : normalizeNickname(existing?.nickname),
         type: options?.type ?? existing?.type ?? FavoriteChannelType.REFERENCE_ORIGINAL,
+        channelType: resolveChannelType(channelId, options?.channelType ?? existing?.channelType),
         order: options?.order ?? existing?.order ?? getNextOrder(),
         parentId: options?.parentId !== undefined ? options.parentId : (existing?.parentId ?? null),
     };
@@ -147,13 +180,13 @@ export async function toggleLocalFavorite(channelId: string): Promise<boolean> {
     return true;
 }
 
-export async function setFavoriteNickname(channelId: string, nickname: string): Promise<void> {
+export async function setFavoriteNickname(channelId: string, nickname: string | null): Promise<void> {
     const existing = cache[channelId];
     if (!existing) return;
 
     cache = {
         ...cache,
-        [channelId]: { ...existing, nickname: nickname.trim() },
+        [channelId]: { ...existing, nickname: normalizeNickname(nickname) },
     };
     notifyListeners();
     await persist();
@@ -172,7 +205,6 @@ export async function setFavoriteParent(channelId: string, parentId: string | nu
 }
 
 export async function createLocalCategory(name: string): Promise<LocalFavoriteChannel> {
-    // Generate a unique numeric snowflake-like ID for compatibility with Discord's FavoriteStore
     const id = `${Date.now()}${Math.floor(Math.random() * 100000).toString().padStart(5, "0")}`;
     return addLocalFavorite(id, {
         nickname: name.trim() || "New Category",
@@ -196,7 +228,6 @@ export async function moveLocalFavorite(channelId: string, direction: -1 | 1): P
         [target.id]: { ...target, order: current.order },
     };
 
-    // Normalize orders if they happened to be equal
     if (current.order === target.order) {
         const reordered = [...sorted];
         reordered[index] = target;
@@ -220,13 +251,7 @@ export async function importFavoritesMap(entries: FavoriteChannelMap): Promise<n
     for (const [id, raw] of Object.entries(entries)) {
         if (!id || !raw || typeof raw !== "object") continue;
         if (!next[id]) {
-            next[id] = {
-                id,
-                nickname: typeof raw.nickname === "string" ? raw.nickname : "",
-                type: typeof raw.type === "number" ? raw.type : FavoriteChannelType.REFERENCE_ORIGINAL,
-                order: typeof raw.order === "number" ? raw.order : nextOrder++,
-                parentId: typeof raw.parentId === "string" ? raw.parentId : null,
-            };
+            next[id] = normalizeEntry(id, raw, nextOrder++);
             importedCount++;
         }
     }

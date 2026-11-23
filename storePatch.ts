@@ -1,4 +1,5 @@
 import { findStore } from "@webpack";
+import { ChannelStore } from "@webpack/common";
 
 import {
     getLocalFavorite,
@@ -10,6 +11,7 @@ import { FavoriteChannelMap, LocalFavoriteChannel } from "./types";
 interface DiscordFavoriteStore {
     getFavoriteChannels?: () => FavoriteChannelMap;
     getFavorite?: (channelId: string) => LocalFavoriteChannel | undefined;
+    getNickname?: (channelId: string) => string | null | undefined;
     isFavorite?: (channelId: string) => boolean;
     isChannelOrParentFavorited?: (channel: { id?: string; parent_id?: string | null; } | null | undefined) => boolean;
     favoriteGuildEnabled?: boolean;
@@ -34,6 +36,24 @@ let favoriteStore: DiscordFavoriteStore | null = null;
 let originalGetFavoriteChannels: (() => FavoriteChannelMap) | null = null;
 const savedDescriptors: SavedDescriptor[] = [];
 let patched = false;
+
+function toDiscordFavorite(fav: LocalFavoriteChannel): LocalFavoriteChannel {
+    const nickname = typeof fav.nickname === "string" && fav.nickname.trim().length > 0
+        ? fav.nickname.trim()
+        : null;
+    const channelType = typeof fav.channelType === "number"
+        ? fav.channelType
+        : ChannelStore.getChannel(fav.id)?.type;
+
+    return {
+        id: fav.id,
+        nickname,
+        type: fav.type,
+        channelType,
+        order: fav.order,
+        parentId: fav.parentId ?? null,
+    };
+}
 
 function findDescriptor(obj: object, key: string): { owner: object; descriptor: PropertyDescriptor; } | null {
     let curr: object | null = obj;
@@ -121,12 +141,14 @@ export function patchFavoriteStore(options: PatchOptions): boolean {
                 if (!options.isEnabled()) return nativeFavs;
 
                 const localFavs = getLocalFavorites();
-                if (Object.keys(localFavs).length === 0) return nativeFavs;
+                const keys = Object.keys(localFavs);
+                if (keys.length === 0) return nativeFavs;
 
-                return {
-                    ...nativeFavs,
-                    ...localFavs,
-                };
+                const merged: FavoriteChannelMap = { ...nativeFavs };
+                for (const id of keys) {
+                    merged[id] = toDiscordFavorite(localFavs[id]);
+                }
+                return merged;
             },
         });
     }
@@ -139,14 +161,29 @@ export function patchFavoriteStore(options: PatchOptions): boolean {
             value: function getFavoritePatched(channelId: string): LocalFavoriteChannel | undefined {
                 if (options.isEnabled()) {
                     const local = getLocalFavorite(channelId);
-                    if (local) return local;
+                    if (local) return toDiscordFavorite(local);
                 }
                 return orig.call(this, channelId);
             },
         });
     }
 
-    // 3. Patch isFavorite
+    // 3. Patch getNickname if present
+    if (typeof store.getNickname === "function") {
+        const orig = store.getNickname;
+        saveAndDefine(store, "getNickname", {
+            writable: true,
+            value: function getNicknamePatched(channelId: string): string | null | undefined {
+                if (options.isEnabled()) {
+                    const local = getLocalFavorite(channelId);
+                    if (local) return toDiscordFavorite(local).nickname;
+                }
+                return orig.call(this, channelId);
+            },
+        });
+    }
+
+    // 4. Patch isFavorite
     if (typeof store.isFavorite === "function") {
         const orig = store.isFavorite;
         saveAndDefine(store, "isFavorite", {
@@ -160,7 +197,7 @@ export function patchFavoriteStore(options: PatchOptions): boolean {
         });
     }
 
-    // 4. Patch isChannelOrParentFavorited
+    // 5. Patch isChannelOrParentFavorited
     if (typeof store.isChannelOrParentFavorited === "function") {
         const orig = store.isChannelOrParentFavorited;
         saveAndDefine(store, "isChannelOrParentFavorited", {
@@ -177,7 +214,7 @@ export function patchFavoriteStore(options: PatchOptions): boolean {
         });
     }
 
-    // 5. Patch favoriteGuildEnabled getter/property so the Favorites tab shows up even without Nitro
+    // 6. Patch favoriteGuildEnabled getter/property so the Favorites tab shows up even without Nitro
     const guildEnabledInfo = findDescriptor(store, "favoriteGuildEnabled");
     if (guildEnabledInfo) {
         const origDesc = guildEnabledInfo.descriptor;
@@ -195,7 +232,7 @@ export function patchFavoriteStore(options: PatchOptions): boolean {
         });
     }
 
-    // 6. Patch hasFavoriteChannels if present (either getter or method)
+    // 7. Patch hasFavoriteChannels if present (either getter or method)
     const hasFavsInfo = findDescriptor(store, "hasFavoriteChannels");
     if (hasFavsInfo) {
         const origDesc = hasFavsInfo.descriptor;
@@ -230,7 +267,6 @@ export function patchFavoriteStore(options: PatchOptions): boolean {
 export function unpatchFavoriteStore(): void {
     if (!patched) return;
 
-    // Restore in reverse order
     while (savedDescriptors.length > 0) {
         const entry = savedDescriptors.pop()!;
         try {

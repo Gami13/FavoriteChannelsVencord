@@ -6,8 +6,9 @@ export const enum FavoriteChannelType {
 
 export interface LocalFavoriteChannel {
     id: string;
-    nickname: string;
+    nickname: string | null;
     type: FavoriteChannelType;
+    channelType?: number;
     order: number;
     parentId: string | null;
 }

@@ -112,7 +112,7 @@ function FavoritesModalComponent({ modalProps }: { modalProps: ModalProps; }) {
         return (
             info.name.toLowerCase().includes(query) ||
             info.subtitle.toLowerCase().includes(query) ||
-            fav.nickname.toLowerCase().includes(query) ||
+            (fav.nickname ?? "").toLowerCase().includes(query) ||
             fav.id.includes(query)
         );
     });
@@ -265,7 +265,7 @@ function FavoritesModalComponent({ modalProps }: { modalProps: ModalProps; }) {
                                                 variant="secondary"
                                                 onClick={() => {
                                                     setEditingId(fav.id);
-                                                    setDraftNickname(fav.nickname);
+                                                    setDraftNickname(fav.nickname ?? "");
                                                 }}
                                             >
                                                 Rename
