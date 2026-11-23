@@ -1,3 +1,6 @@
+import { Button } from "@components/Button";
+import { Heading } from "@components/LegacyHeading";
+import { Paragraph } from "@components/Paragraph";
 import {
     ModalCloseButton,
     ModalContent,
@@ -9,14 +12,12 @@ import {
     openModal,
 } from "@utils/modal";
 import {
-    Button,
     ChannelStore,
-    Forms,
     GuildStore,
     NavigationRouter,
     React,
+    showToast,
     TextInput,
-    Toasts,
     UserStore,
 } from "@webpack/common";
 
@@ -56,7 +57,6 @@ function resolveChannelDisplay(channelId: string): {
         };
     }
 
-    // DM or Group DM
     if (channel.name) {
         return {
             name: channel.name,
@@ -120,28 +120,25 @@ function FavoritesModalComponent({ modalProps }: { modalProps: ModalProps; }) {
     async function handleImportNative() {
         const native = getNativeFavoriteChannels();
         const count = await importFavoritesMap(native);
-        Toasts.show({
-            message: count > 0
+        showToast({
+            text: count > 0
                 ? `Imported ${count} native favorite channel${count === 1 ? "" : "s"}.`
                 : "No new native favorites to import.",
-            type: count > 0 ? Toasts.Type.SUCCESS : Toasts.Type.MESSAGE,
-            id: Toasts.genId(),
+            variant: count > 0 ? "success" : "default",
         });
     }
 
     async function handleCopyBackup() {
         try {
             await navigator.clipboard.writeText(exportFavoritesJson());
-            Toasts.show({
-                message: "Copied local favorites JSON to clipboard.",
-                type: Toasts.Type.SUCCESS,
-                id: Toasts.genId(),
+            showToast({
+                text: "Copied local favorites JSON to clipboard.",
+                variant: "success",
             });
         } catch {
-            Toasts.show({
-                message: "Failed to copy to clipboard.",
-                type: Toasts.Type.FAILURE,
-                id: Toasts.genId(),
+            showToast({
+                text: "Failed to copy to clipboard.",
+                variant: "critical",
             });
         }
     }
@@ -155,9 +152,9 @@ function FavoritesModalComponent({ modalProps }: { modalProps: ModalProps; }) {
     return (
         <ModalRoot {...modalProps} size={ModalSize.MEDIUM}>
             <ModalHeader separator={false}>
-                <Forms.FormTitle tag="h2" style={{ margin: 0, flexGrow: 1 }}>
+                <Heading tag="h2" style={{ margin: 0, flexGrow: 1 }}>
                     Local Favorite Channels ({favorites.length})
-                </Forms.FormTitle>
+                </Heading>
                 <ModalCloseButton onClick={modalProps.onClose} />
             </ModalHeader>
 
@@ -171,11 +168,11 @@ function FavoritesModalComponent({ modalProps }: { modalProps: ModalProps; }) {
                 </div>
 
                 {filtered.length === 0 ? (
-                    <Forms.FormText style={{ textAlign: "center", padding: "24px 8px", opacity: 0.75 }}>
+                    <Paragraph style={{ textAlign: "center", padding: "24px 8px", opacity: 0.75 }}>
                         {favorites.length === 0
                             ? "No local favorites yet. Right-click any channel or DM and select \"Add to Local Favorites\"."
                             : "No favorite channels match your search."}
-                    </Forms.FormText>
+                    </Paragraph>
                 ) : (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                         {filtered.map((fav, idx) => {
@@ -204,15 +201,15 @@ function FavoritesModalComponent({ modalProps }: { modalProps: ModalProps; }) {
                                                     placeholder={info.name}
                                                 />
                                                 <Button
-                                                    size={Button.Sizes.SMALL}
-                                                    color={Button.Colors.GREEN}
+                                                    size="small"
+                                                    variant="positive"
                                                     onClick={() => saveNickname(fav.id)}
                                                 >
                                                     Save
                                                 </Button>
                                                 <Button
-                                                    size={Button.Sizes.SMALL}
-                                                    look={Button.Looks.LINK}
+                                                    size="small"
+                                                    variant="secondary"
                                                     onClick={() => setEditingId(null)}
                                                 >
                                                     Cancel
@@ -220,7 +217,7 @@ function FavoritesModalComponent({ modalProps }: { modalProps: ModalProps; }) {
                                             </div>
                                         ) : (
                                             <>
-                                                <Forms.FormText
+                                                <Paragraph
                                                     style={{
                                                         fontWeight: 600,
                                                         overflow: "hidden",
@@ -229,8 +226,8 @@ function FavoritesModalComponent({ modalProps }: { modalProps: ModalProps; }) {
                                                     }}
                                                 >
                                                     {fav.nickname ? `${fav.nickname} (${info.name})` : info.name}
-                                                </Forms.FormText>
-                                                <Forms.FormText
+                                                </Paragraph>
+                                                <Paragraph
                                                     style={{
                                                         fontSize: 12,
                                                         opacity: 0.7,
@@ -240,7 +237,7 @@ function FavoritesModalComponent({ modalProps }: { modalProps: ModalProps; }) {
                                                     }}
                                                 >
                                                     {info.subtitle}
-                                                </Forms.FormText>
+                                                </Paragraph>
                                             </>
                                         )}
                                     </div>
@@ -248,24 +245,24 @@ function FavoritesModalComponent({ modalProps }: { modalProps: ModalProps; }) {
                                     {!isEditing && (
                                         <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
                                             <Button
-                                                size={Button.Sizes.SMALL}
-                                                color={Button.Colors.PRIMARY}
+                                                size="small"
+                                                variant="secondary"
                                                 disabled={idx === 0 || Boolean(query)}
                                                 onClick={() => moveLocalFavorite(fav.id, -1)}
                                             >
                                                 ↑
                                             </Button>
                                             <Button
-                                                size={Button.Sizes.SMALL}
-                                                color={Button.Colors.PRIMARY}
+                                                size="small"
+                                                variant="secondary"
                                                 disabled={idx === filtered.length - 1 || Boolean(query)}
                                                 onClick={() => moveLocalFavorite(fav.id, 1)}
                                             >
                                                 ↓
                                             </Button>
                                             <Button
-                                                size={Button.Sizes.SMALL}
-                                                color={Button.Colors.PRIMARY}
+                                                size="small"
+                                                variant="secondary"
                                                 onClick={() => {
                                                     setEditingId(fav.id);
                                                     setDraftNickname(fav.nickname);
@@ -274,8 +271,8 @@ function FavoritesModalComponent({ modalProps }: { modalProps: ModalProps; }) {
                                                 Rename
                                             </Button>
                                             <Button
-                                                size={Button.Sizes.SMALL}
-                                                color={Button.Colors.BRAND}
+                                                size="small"
+                                                variant="primary"
                                                 onClick={() => {
                                                     jumpToChannel(fav.id, info.guildId);
                                                     modalProps.onClose();
@@ -284,8 +281,8 @@ function FavoritesModalComponent({ modalProps }: { modalProps: ModalProps; }) {
                                                 Jump
                                             </Button>
                                             <Button
-                                                size={Button.Sizes.SMALL}
-                                                color={Button.Colors.RED}
+                                                size="small"
+                                                variant="dangerPrimary"
                                                 onClick={() => removeLocalFavorite(fav.id)}
                                             >
                                                 Remove
@@ -303,21 +300,21 @@ function FavoritesModalComponent({ modalProps }: { modalProps: ModalProps; }) {
                 <div style={{ display: "flex", gap: 8, width: "100%", justifyContent: "space-between" }}>
                     <div style={{ display: "flex", gap: 8 }}>
                         <Button
-                            size={Button.Sizes.SMALL}
-                            color={Button.Colors.PRIMARY}
+                            size="small"
+                            variant="secondary"
                             onClick={handleImportNative}
                         >
                             Import Native Favorites
                         </Button>
                         <Button
-                            size={Button.Sizes.SMALL}
-                            color={Button.Colors.PRIMARY}
+                            size="small"
+                            variant="secondary"
                             onClick={handleCopyBackup}
                         >
                             Copy JSON Backup
                         </Button>
                     </div>
-                    <Button size={Button.Sizes.SMALL} onClick={modalProps.onClose}>
+                    <Button size="small" onClick={modalProps.onClose}>
                         Done
                     </Button>
                 </div>

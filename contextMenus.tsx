@@ -1,5 +1,5 @@
 import { findGroupChildrenByChildId, NavContextMenuPatchCallback } from "@api/ContextMenu";
-import { ChannelStore, Menu, Toasts } from "@webpack/common";
+import { ChannelStore, Menu, showToast } from "@webpack/common";
 
 import { openFavoritesModal } from "./components/FavoritesModal";
 import { settings } from "./settings";
@@ -9,12 +9,11 @@ function showFavoriteToast(added: boolean, channelName?: string): void {
     if (!settings.store.showToasts) return;
 
     const label = channelName ? `#${channelName}` : "channel";
-    Toasts.show({
-        message: added
+    showToast({
+        text: added
             ? `Added ${label} to local favorites.`
             : `Removed ${label} from local favorites.`,
-        type: Toasts.Type.SUCCESS,
-        id: Toasts.genId(),
+        variant: "success",
     });
 }
 

@@ -1,6 +1,8 @@
 import { definePluginSettings } from "@api/Settings";
+import { Button } from "@components/Button";
+import { Paragraph } from "@components/Paragraph";
 import { OptionType } from "@utils/types";
-import { Button, Forms, React, TextArea, Toasts } from "@webpack/common";
+import { React, showToast, TextArea } from "@webpack/common";
 
 import { openFavoritesModal } from "./components/FavoritesModal";
 import {
@@ -31,28 +33,25 @@ function ManageFavoritesSettingsComponent() {
     async function handleImportNative() {
         const native = getNativeFavoriteChannels();
         const imported = await importFavoritesMap(native);
-        Toasts.show({
-            message: imported > 0
+        showToast({
+            text: imported > 0
                 ? `Imported ${imported} native favorite channel${imported === 1 ? "" : "s"}.`
                 : "No new native favorites found to import.",
-            type: imported > 0 ? Toasts.Type.SUCCESS : Toasts.Type.MESSAGE,
-            id: Toasts.genId(),
+            variant: imported > 0 ? "success" : "default",
         });
     }
 
     async function handleExport() {
         try {
             await navigator.clipboard.writeText(exportFavoritesJson());
-            Toasts.show({
-                message: "Copied local favorites JSON to clipboard.",
-                type: Toasts.Type.SUCCESS,
-                id: Toasts.genId(),
+            showToast({
+                text: "Copied local favorites JSON to clipboard.",
+                variant: "success",
             });
         } catch {
-            Toasts.show({
-                message: "Could not copy JSON to clipboard.",
-                type: Toasts.Type.FAILURE,
-                id: Toasts.genId(),
+            showToast({
+                text: "Could not copy JSON to clipboard.",
+                variant: "critical",
             });
         }
     }
@@ -65,57 +64,54 @@ function ManageFavoritesSettingsComponent() {
                 throw new Error("Invalid format");
             }
             const imported = await importFavoritesMap(map);
-            Toasts.show({
-                message: `Imported ${imported} favorite channel${imported === 1 ? "" : "s"}.`,
-                type: Toasts.Type.SUCCESS,
-                id: Toasts.genId(),
+            showToast({
+                text: `Imported ${imported} favorite channel${imported === 1 ? "" : "s"}.`,
+                variant: "success",
             });
             setImportText("");
             setShowImportBox(false);
         } catch {
-            Toasts.show({
-                message: "Invalid JSON backup format.",
-                type: Toasts.Type.FAILURE,
-                id: Toasts.genId(),
+            showToast({
+                text: "Invalid JSON backup format.",
+                variant: "critical",
             });
         }
     }
 
     async function handleClear() {
         await clearLocalFavorites();
-        Toasts.show({
-            message: "Cleared all local favorites.",
-            type: Toasts.Type.SUCCESS,
-            id: Toasts.genId(),
+        showToast({
+            text: "Cleared all local favorites.",
+            variant: "success",
         });
     }
 
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <Forms.FormText>
+            <Paragraph>
                 Currently storing <strong>{count}</strong> local favorite channel{count === 1 ? "" : "s"} on this device.
-            </Forms.FormText>
+            </Paragraph>
 
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                <Button size={Button.Sizes.SMALL} onClick={openFavoritesModal}>
+                <Button size="small" onClick={openFavoritesModal}>
                     Open Favorites Manager
                 </Button>
-                <Button size={Button.Sizes.SMALL} color={Button.Colors.PRIMARY} onClick={handleImportNative}>
+                <Button size="small" variant="secondary" onClick={handleImportNative}>
                     Import Native Favorites
                 </Button>
-                <Button size={Button.Sizes.SMALL} color={Button.Colors.PRIMARY} onClick={handleExport}>
+                <Button size="small" variant="secondary" onClick={handleExport}>
                     Export JSON
                 </Button>
                 <Button
-                    size={Button.Sizes.SMALL}
-                    color={Button.Colors.PRIMARY}
+                    size="small"
+                    variant="secondary"
                     onClick={() => setShowImportBox(v => !v)}
                 >
                     {showImportBox ? "Hide JSON Import" : "Import JSON"}
                 </Button>
                 <Button
-                    size={Button.Sizes.SMALL}
-                    color={Button.Colors.RED}
+                    size="small"
+                    variant="dangerPrimary"
                     disabled={count === 0}
                     onClick={handleClear}
                 >
@@ -132,7 +128,7 @@ function ManageFavoritesSettingsComponent() {
                         rows={5}
                     />
                     <div>
-                        <Button size={Button.Sizes.SMALL} color={Button.Colors.GREEN} onClick={handleImportJson}>
+                        <Button size="small" variant="positive" onClick={handleImportJson}>
                             Apply JSON Import
                         </Button>
                     </div>
