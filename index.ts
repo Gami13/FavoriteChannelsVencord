@@ -6,6 +6,7 @@ import {
     threadContextMenuPatch,
     userContextMenuPatch,
 } from "./contextMenus";
+import { refreshServerIcons, startServerIconDecorator, stopServerIconDecorator } from "./serverIconDecorator";
 import { settings } from "./settings";
 import { loadFavorites, resetCache, subscribeFavorites } from "./storage";
 import { emitFavoriteStoreChange, patchFavoriteStore, unpatchFavoriteStore } from "./storePatch";
@@ -41,12 +42,15 @@ export default definePlugin({
     async start() {
         unsubscribeStorage = subscribeFavorites(() => {
             emitFavoriteStoreChange();
+            refreshServerIcons();
         });
 
         patchFavoriteStore({
             isEnabled: () => settings.store.enableStoreIntegration,
             shouldForceGuildVisible: () => settings.store.forceShowFavoritesTab,
         });
+
+        startServerIconDecorator(() => settings.store.showServerIcon);
 
         try {
             await loadFavorites();
@@ -59,6 +63,7 @@ export default definePlugin({
         unsubscribeStorage?.();
         unsubscribeStorage = null;
 
+        stopServerIconDecorator();
         unpatchFavoriteStore();
         resetCache();
     },

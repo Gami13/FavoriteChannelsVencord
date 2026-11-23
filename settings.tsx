@@ -5,6 +5,7 @@ import { OptionType } from "@utils/types";
 import { React, showToast, TextArea } from "@webpack/common";
 
 import { openFavoritesModal } from "./components/FavoritesModal";
+import { refreshServerIcons } from "./serverIconDecorator";
 import {
     clearLocalFavorites,
     exportFavoritesJson,
@@ -150,6 +151,12 @@ export const settings = definePluginSettings({
         description: "Show Discord's Favorites server tab in the sidebar whenever you have local favorites (no Nitro required).",
         default: true,
         onChange: () => emitFavoriteStoreChange(),
+    },
+    showServerIcon: {
+        type: OptionType.BOOLEAN,
+        description: "Show the server's icon next to a compact # icon for favorited server channels.",
+        default: true,
+        onChange: () => refreshServerIcons(),
     },
     showToasts: {
         type: OptionType.BOOLEAN,
