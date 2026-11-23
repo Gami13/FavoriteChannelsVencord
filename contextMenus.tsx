@@ -4,6 +4,7 @@ import { ChannelStore, Menu, showToast } from "@webpack/common";
 import { openFavoritesModal } from "./components/FavoritesModal";
 import { settings } from "./settings";
 import { isLocalFavorite, toggleLocalFavorite } from "./storage";
+import { getNativeFavoriteChannels } from "./storePatch";
 
 function showFavoriteToast(added: boolean, channelName?: string): void {
     if (!settings.store.showToasts) return;
@@ -28,7 +29,8 @@ function injectFavoriteMenuItems(children: any[], channelId: string | undefined,
             label={favorited ? "Remove from Local Favorites" : "Add to Local Favorites"}
             color={favorited ? "danger" : undefined}
             action={async () => {
-                const nowFavorited = await toggleLocalFavorite(channelId);
+                const nativeOrders = Object.values(getNativeFavoriteChannels()).map(f => f.order);
+                const nowFavorited = await toggleLocalFavorite(channelId, nativeOrders);
                 showFavoriteToast(nowFavorited, channelName);
             }}
         />,

@@ -7,6 +7,7 @@ const STORAGE_PREFIX = "UnlimitedFavorites_v1_";
 
 let currentUserId: string | null = null;
 let cache: FavoriteChannelMap = {};
+let nativeOrderOverrides: Record<string, number> = {};
 let loaded = false;
 
 type ChangeListener = () => void;
@@ -58,6 +59,7 @@ async function persist(): Promise<void> {
     const payload: StoredFavoritesPayload = {
         version: 1,
         favorites: { ...cache },
+        nativeOrderOverrides: { ...nativeOrderOverrides },
     };
     await set(getStorageKey(userId), payload);
 }
@@ -80,8 +82,12 @@ export async function loadFavorites(explicitUserId?: string): Promise<FavoriteCh
             normalized[id] = normalizeEntry(id, raw, idx++);
         }
         cache = normalized;
+        nativeOrderOverrides = stored.nativeOrderOverrides && typeof stored.nativeOrderOverrides === "object"
+            ? { ...stored.nativeOrderOverrides }
+            : {};
     } else {
         cache = {};
+        nativeOrderOverrides = {};
     }
 
     loaded = true;
@@ -101,6 +107,10 @@ export function getLocalFavorites(): FavoriteChannelMap {
     return cache;
 }
 
+export function getNativeOrderOverrides(): Record<string, number> {
+    return nativeOrderOverrides;
+}
+
 export function getLocalFavoritesList(): LocalFavoriteChannel[] {
     return Object.values(cache).sort((a, b) => a.order - b.order);
 }
@@ -117,10 +127,15 @@ export function isLocalFavorite(channelId: string): boolean {
     return Object.prototype.hasOwnProperty.call(cache, channelId);
 }
 
-function getNextOrder(): number {
-    const values = Object.values(cache);
-    if (values.length === 0) return 0;
-    return Math.max(...values.map(v => v.order)) + 1;
+function getNextOrder(extraOrders: number[] = []): number {
+    const orders = [
+        ...Object.values(cache).map(v => v.order),
+        ...Object.values(nativeOrderOverrides),
+        ...extraOrders,
+    ].filter(n => typeof n === "number" && Number.isFinite(n));
+
+    if (orders.length === 0) return 0;
+    return Math.max(...orders) + 1;
 }
 
 export async function addLocalFavorite(
@@ -131,6 +146,7 @@ export async function addLocalFavorite(
         type?: FavoriteChannelType;
         channelType?: number;
         order?: number;
+        existingOrders?: number[];
     }
 ): Promise<LocalFavoriteChannel> {
     const existing = cache[channelId];
@@ -141,7 +157,7 @@ export async function addLocalFavorite(
             : normalizeNickname(existing?.nickname),
         type: options?.type ?? existing?.type ?? FavoriteChannelType.REFERENCE_ORIGINAL,
         channelType: resolveChannelType(channelId, options?.channelType ?? existing?.channelType),
-        order: options?.order ?? existing?.order ?? getNextOrder(),
+        order: options?.order ?? existing?.order ?? getNextOrder(options?.existingOrders),
         parentId: options?.parentId !== undefined ? options.parentId : (existing?.parentId ?? null),
     };
 
@@ -170,13 +186,13 @@ export async function removeLocalFavorite(channelId: string): Promise<boolean> {
     return true;
 }
 
-export async function toggleLocalFavorite(channelId: string): Promise<boolean> {
+export async function toggleLocalFavorite(channelId: string, existingOrders?: number[]): Promise<boolean> {
     if (isLocalFavorite(channelId)) {
         await removeLocalFavorite(channelId);
         return false;
     }
 
-    await addLocalFavorite(channelId);
+    await addLocalFavorite(channelId, { existingOrders });
     return true;
 }
 
@@ -243,6 +259,57 @@ export async function moveLocalFavorite(channelId: string, direction: -1 | 1): P
     await persist();
 }
 
+export async function applyReorderUpdates(
+    localUpdates: Record<string, { order: number; parentId: string | null; nickname?: string | null; }>,
+    deletedLocalIds: string[],
+    updatedNativeOrders: Record<string, number>
+): Promise<void> {
+    let changed = false;
+    const nextCache: FavoriteChannelMap = { ...cache };
+
+    for (const id of deletedLocalIds) {
+        if (nextCache[id]) {
+            delete nextCache[id];
+            changed = true;
+        }
+    }
+
+    for (const [id, update] of Object.entries(localUpdates)) {
+        const existing = nextCache[id];
+        if (!existing) continue;
+
+        const nextNick = update.nickname !== undefined ? normalizeNickname(update.nickname) : existing.nickname;
+        if (
+            existing.order !== update.order ||
+            existing.parentId !== update.parentId ||
+            existing.nickname !== nextNick
+        ) {
+            nextCache[id] = {
+                ...existing,
+                order: update.order,
+                parentId: update.parentId,
+                nickname: nextNick,
+            };
+            changed = true;
+        }
+    }
+
+    const nextOverrides: Record<string, number> = { ...nativeOrderOverrides };
+    for (const [id, pos] of Object.entries(updatedNativeOrders)) {
+        if (nextOverrides[id] !== pos) {
+            nextOverrides[id] = pos;
+            changed = true;
+        }
+    }
+
+    if (!changed) return;
+
+    cache = nextCache;
+    nativeOrderOverrides = nextOverrides;
+    notifyListeners();
+    await persist();
+}
+
 export async function importFavoritesMap(entries: FavoriteChannelMap): Promise<number> {
     let importedCount = 0;
     const next: FavoriteChannelMap = { ...cache };
@@ -269,18 +336,21 @@ export function exportFavoritesJson(): string {
     const payload: StoredFavoritesPayload = {
         version: 1,
         favorites: cache,
+        nativeOrderOverrides,
     };
     return JSON.stringify(payload, null, 2);
 }
 
 export async function clearLocalFavorites(): Promise<void> {
     cache = {};
+    nativeOrderOverrides = {};
     notifyListeners();
     await persist();
 }
 
 export function resetCache(): void {
     cache = {};
+    nativeOrderOverrides = {};
     loaded = false;
     currentUserId = null;
 }

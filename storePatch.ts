@@ -1,9 +1,11 @@
 import { findStore } from "@webpack";
-import { ChannelStore } from "@webpack/common";
+import { ChannelStore, UserSettingsActionCreators } from "@webpack/common";
 
 import {
+    applyReorderUpdates,
     getLocalFavorite,
     getLocalFavorites,
+    getNativeOrderOverrides,
     isLocalFavorite,
 } from "./storage";
 import { FavoriteChannelMap, LocalFavoriteChannel } from "./types";
@@ -75,6 +77,102 @@ function saveAndDefine(target: object, key: string, newDescriptor: PropertyDescr
     });
 }
 
+function patchUserSettingsActionCreator(creator: any, options: PatchOptions): void {
+    if (!creator || typeof creator.updateAsync !== "function") return;
+
+    const origUpdateAsync = creator.updateAsync;
+    saveAndDefine(creator, "updateAsync", {
+        writable: true,
+        value: function updateAsyncPatched(section: string, updater: (proto: any) => any, ...rest: any[]) {
+            if (section !== "favorites" || typeof updater !== "function" || !options.isEnabled()) {
+                return origUpdateAsync.call(this, section, updater, ...rest);
+            }
+
+            const wrappedUpdater = (proto: any) => {
+                if (!proto.favoriteChannels) {
+                    proto.favoriteChannels = {};
+                }
+
+                const nativeIds = new Set(Object.keys(proto.favoriteChannels));
+                const localFavs = getLocalFavorites();
+                const nativeOverrides = getNativeOrderOverrides();
+
+                // Apply any local native order overrides before Discord recalculates positions
+                for (const id of nativeIds) {
+                    if (typeof nativeOverrides[id] === "number" && proto.favoriteChannels[id]) {
+                        proto.favoriteChannels[id].position = nativeOverrides[id];
+                    }
+                }
+
+                // Temporarily inject local favorites so Discord's drag-and-drop / category
+                // / rename updater mutates their `position`, `parentId`, and `nickname`
+                for (const [id, fav] of Object.entries(localFavs)) {
+                    if (!proto.favoriteChannels[id]) {
+                        proto.favoriteChannels[id] = {
+                            nickname: fav.nickname ?? "",
+                            type: fav.type,
+                            position: fav.order,
+                            parentId: fav.parentId ?? "0",
+                        };
+                    } else {
+                        proto.favoriteChannels[id].position = fav.order;
+                    }
+                }
+
+                const result = updater(proto);
+
+                // Capture updated positions/parents/nicknames for local favorites
+                const localUpdates: Record<string, { order: number; parentId: string | null; nickname?: string | null; }> = {};
+                const deletedLocalIds: string[] = [];
+
+                for (const id of Object.keys(localFavs)) {
+                    const updated = proto.favoriteChannels[id];
+                    if (!updated) {
+                        deletedLocalIds.push(id);
+                    } else {
+                        const rawParent = updated.parentId;
+                        const parentId = typeof rawParent === "string" && rawParent.length > 0 && rawParent !== "0"
+                            ? rawParent
+                            : null;
+                        localUpdates[id] = {
+                            order: typeof updated.position === "number" ? updated.position : localFavs[id].order,
+                            parentId,
+                            nickname: typeof updated.nickname === "string"
+                                ? (updated.nickname.trim() || null)
+                                : localFavs[id].nickname,
+                        };
+                    }
+                }
+
+                // Capture updated positions for native favorites so native + local stay cleanly interleaved
+                const updatedNativeOrders: Record<string, number> = {};
+                for (const id of nativeIds) {
+                    const updated = proto.favoriteChannels[id];
+                    if (updated && typeof updated.position === "number") {
+                        updatedNativeOrders[id] = updated.position;
+                    }
+                }
+
+                // Strip local-only channels back out so Discord's server never sees > 3 favorites
+                for (const id of Object.keys(localFavs)) {
+                    if (!nativeIds.has(id)) {
+                        delete proto.favoriteChannels[id];
+                    }
+                }
+
+                // Persist changes locally and notify FavoriteStore
+                applyReorderUpdates(localUpdates, deletedLocalIds, updatedNativeOrders).catch(err => {
+                    console.error("[UnlimitedFavorites] Failed to persist reorder updates:", err);
+                });
+
+                return result;
+            };
+
+            return origUpdateAsync.call(this, section, wrappedUpdater, ...rest);
+        },
+    });
+}
+
 export function getFavoriteStore(): DiscordFavoriteStore | null {
     if (!favoriteStore) {
         try {
@@ -141,11 +239,18 @@ export function patchFavoriteStore(options: PatchOptions): boolean {
                 if (!options.isEnabled()) return nativeFavs;
 
                 const localFavs = getLocalFavorites();
-                const keys = Object.keys(localFavs);
-                if (keys.length === 0) return nativeFavs;
+                const nativeOverrides = getNativeOrderOverrides();
+                const localKeys = Object.keys(localFavs);
+                const overrideKeys = Object.keys(nativeOverrides);
+                if (localKeys.length === 0 && overrideKeys.length === 0) return nativeFavs;
 
-                const merged: FavoriteChannelMap = { ...nativeFavs };
-                for (const id of keys) {
+                const merged: FavoriteChannelMap = {};
+                for (const [id, entry] of Object.entries(nativeFavs)) {
+                    merged[id] = typeof nativeOverrides[id] === "number"
+                        ? { ...entry, order: nativeOverrides[id] }
+                        : entry;
+                }
+                for (const id of localKeys) {
                     merged[id] = toDiscordFavorite(localFavs[id]);
                 }
                 return merged;
@@ -162,6 +267,13 @@ export function patchFavoriteStore(options: PatchOptions): boolean {
                 if (options.isEnabled()) {
                     const local = getLocalFavorite(channelId);
                     if (local) return toDiscordFavorite(local);
+
+                    const nativeEntry = orig.call(this, channelId);
+                    const overrides = getNativeOrderOverrides();
+                    if (nativeEntry && typeof overrides[channelId] === "number") {
+                        return { ...nativeEntry, order: overrides[channelId] };
+                    }
+                    return nativeEntry;
                 }
                 return orig.call(this, channelId);
             },
@@ -257,6 +369,19 @@ export function patchFavoriteStore(options: PatchOptions): boolean {
                 },
             });
         }
+    }
+
+    // 8. Patch UserSettingsActionCreators.updateAsync("favorites", ...) so drag-and-drop
+    // reordering, category assignment, and renaming work seamlessly for local favorites!
+    try {
+        patchUserSettingsActionCreator(UserSettingsActionCreators.PreloadedUserSettingsActionCreators, options);
+    } catch (err) {
+        console.warn("[UnlimitedFavorites] Could not patch PreloadedUserSettingsActionCreators:", err);
+    }
+    try {
+        patchUserSettingsActionCreator(UserSettingsActionCreators.FrecencyUserSettingsActionCreators, options);
+    } catch (err) {
+        console.warn("[UnlimitedFavorites] Could not patch FrecencyUserSettingsActionCreators:", err);
     }
 
     patched = true;

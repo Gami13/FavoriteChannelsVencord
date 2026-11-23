@@ -18,4 +18,5 @@ export type FavoriteChannelMap = Record<string, LocalFavoriteChannel>;
 export interface StoredFavoritesPayload {
     version: 1;
     favorites: FavoriteChannelMap;
+    nativeOrderOverrides?: Record<string, number>;
 }
