@@ -20,7 +20,7 @@ function ensureStyles(): void {
             border-radius: 50%;
             object-fit: cover;
             flex-shrink: 0;
-            margin-right: 4px;
+            margin-right: -3px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -38,6 +38,7 @@ function ensureStyles(): void {
             height: 14px !important;
             min-width: 14px !important;
             opacity: 0.72;
+            margin-left: 0 !important;
             margin-right: 3px !important;
         }
         [${ICON_SCALED_ATTR}="true"] svg {
