@@ -39,7 +39,7 @@ function ensureStyles(): void {
             min-width: 14px !important;
             opacity: 0.72;
             margin-left: 0 !important;
-            margin-right: 3px !important;
+            margin-right: -3px !important;
         }
         [${ICON_SCALED_ATTR}="true"] svg {
             width: 14px !important;
