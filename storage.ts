@@ -8,16 +8,17 @@ const STORAGE_PREFIX = "UnlimitedFavorites_v1_";
 let currentUserId: string | null = null;
 let cache: FavoriteChannelMap = {};
 let nativeOrderOverrides: Record<string, number> = {};
+let lastUpdatedAt = 0;
 let loaded = false;
 
-type ChangeListener = () => void;
+type ChangeListener = (source: "local" | "external" | "load") => void;
 const listeners = new Set<ChangeListener>();
 
 function getStorageKey(userId: string): string {
     return `${STORAGE_PREFIX}${userId}`;
 }
 
-function resolveUserId(explicitUserId?: string): string {
+export function resolveUserId(explicitUserId?: string): string {
     return explicitUserId ?? UserStore.getCurrentUser()?.id ?? currentUserId ?? "default";
 }
 
@@ -44,20 +45,38 @@ function normalizeEntry(id: string, raw: Partial<LocalFavoriteChannel>, fallback
     };
 }
 
-function notifyListeners(): void {
+function normalizeFavoritesMap(rawMap: FavoriteChannelMap | undefined): FavoriteChannelMap {
+    if (!rawMap || typeof rawMap !== "object") return {};
+    const normalized: FavoriteChannelMap = {};
+    let idx = 0;
+    for (const [id, raw] of Object.entries(rawMap)) {
+        if (!id || !raw || typeof raw !== "object") continue;
+        normalized[id] = normalizeEntry(id, raw, idx++);
+    }
+    return normalized;
+}
+
+function notifyListeners(source: "local" | "external" | "load"): void {
     for (const listener of listeners) {
         try {
-            listener();
+            listener(source);
         } catch (err) {
             console.error("[UnlimitedFavorites] Listener error:", err);
         }
     }
 }
 
-async function persist(): Promise<void> {
+async function persist(source: "local" | "external" = "local", explicitTimestamp?: number): Promise<void> {
     const userId = resolveUserId();
+    if (source === "local") {
+        lastUpdatedAt = Date.now();
+    } else if (typeof explicitTimestamp === "number") {
+        lastUpdatedAt = explicitTimestamp;
+    }
+
     const payload: StoredFavoritesPayload = {
         version: 1,
+        updatedAt: lastUpdatedAt,
         favorites: { ...cache },
         nativeOrderOverrides: { ...nativeOrderOverrides },
     };
@@ -75,24 +94,48 @@ export async function loadFavorites(explicitUserId?: string): Promise<FavoriteCh
 
     const stored = await get<StoredFavoritesPayload>(getStorageKey(userId));
     if (stored && stored.version === 1 && stored.favorites && typeof stored.favorites === "object") {
-        const normalized: FavoriteChannelMap = {};
-        let idx = 0;
-        for (const [id, raw] of Object.entries(stored.favorites)) {
-            if (!id || !raw || typeof raw !== "object") continue;
-            normalized[id] = normalizeEntry(id, raw, idx++);
-        }
-        cache = normalized;
+        cache = normalizeFavoritesMap(stored.favorites);
         nativeOrderOverrides = stored.nativeOrderOverrides && typeof stored.nativeOrderOverrides === "object"
             ? { ...stored.nativeOrderOverrides }
             : {};
+        lastUpdatedAt = typeof stored.updatedAt === "number"
+            ? stored.updatedAt
+            : (Object.keys(cache).length > 0 ? 1 : 0);
     } else {
         cache = {};
         nativeOrderOverrides = {};
+        lastUpdatedAt = 0;
     }
 
     loaded = true;
-    notifyListeners();
+    notifyListeners("load");
     return cache;
+}
+
+export function getCurrentAccountPayload(): StoredFavoritesPayload {
+    return {
+        version: 1,
+        updatedAt: lastUpdatedAt,
+        favorites: { ...cache },
+        nativeOrderOverrides: { ...nativeOrderOverrides },
+    };
+}
+
+export async function applyExternalPayload(payload: StoredFavoritesPayload): Promise<boolean> {
+    const incomingUpdatedAt = typeof payload.updatedAt === "number" ? payload.updatedAt : Date.now();
+    if (incomingUpdatedAt <= lastUpdatedAt && loaded) {
+        return false;
+    }
+
+    cache = normalizeFavoritesMap(payload.favorites);
+    nativeOrderOverrides = payload.nativeOrderOverrides && typeof payload.nativeOrderOverrides === "object"
+        ? { ...payload.nativeOrderOverrides }
+        : {};
+    lastUpdatedAt = incomingUpdatedAt;
+
+    notifyListeners("external");
+    await persist("external", incomingUpdatedAt);
+    return true;
 }
 
 export function isFavoritesLoaded(): boolean {
@@ -101,6 +144,10 @@ export function isFavoritesLoaded(): boolean {
 
 export function getActiveUserId(): string | null {
     return currentUserId;
+}
+
+export function getLastUpdatedAt(): number {
+    return lastUpdatedAt;
 }
 
 export function getLocalFavorites(): FavoriteChannelMap {
@@ -162,8 +209,8 @@ export async function addLocalFavorite(
     };
 
     cache = { ...cache, [channelId]: entry };
-    notifyListeners();
-    await persist();
+    notifyListeners("local");
+    await persist("local");
     return entry;
 }
 
@@ -181,8 +228,8 @@ export async function removeLocalFavorite(channelId: string): Promise<boolean> {
     }
 
     cache = next;
-    notifyListeners();
-    await persist();
+    notifyListeners("local");
+    await persist("local");
     return true;
 }
 
@@ -204,8 +251,8 @@ export async function setFavoriteNickname(channelId: string, nickname: string | 
         ...cache,
         [channelId]: { ...existing, nickname: normalizeNickname(nickname) },
     };
-    notifyListeners();
-    await persist();
+    notifyListeners("local");
+    await persist("local");
 }
 
 export async function setFavoriteParent(channelId: string, parentId: string | null): Promise<void> {
@@ -216,8 +263,8 @@ export async function setFavoriteParent(channelId: string, parentId: string | nu
         ...cache,
         [channelId]: { ...existing, parentId },
     };
-    notifyListeners();
-    await persist();
+    notifyListeners("local");
+    await persist("local");
 }
 
 export async function createLocalCategory(name: string): Promise<LocalFavoriteChannel> {
@@ -255,8 +302,8 @@ export async function moveLocalFavorite(channelId: string, direction: -1 | 1): P
         cache = normalized;
     }
 
-    notifyListeners();
-    await persist();
+    notifyListeners("local");
+    await persist("local");
 }
 
 export async function applyReorderUpdates(
@@ -306,8 +353,8 @@ export async function applyReorderUpdates(
 
     cache = nextCache;
     nativeOrderOverrides = nextOverrides;
-    notifyListeners();
-    await persist();
+    notifyListeners("local");
+    await persist("local");
 }
 
 export async function importFavoritesMap(entries: FavoriteChannelMap): Promise<number> {
@@ -325,8 +372,8 @@ export async function importFavoritesMap(entries: FavoriteChannelMap): Promise<n
 
     if (importedCount > 0) {
         cache = next;
-        notifyListeners();
-        await persist();
+        notifyListeners("local");
+        await persist("local");
     }
 
     return importedCount;
@@ -335,6 +382,7 @@ export async function importFavoritesMap(entries: FavoriteChannelMap): Promise<n
 export function exportFavoritesJson(): string {
     const payload: StoredFavoritesPayload = {
         version: 1,
+        updatedAt: lastUpdatedAt || Date.now(),
         favorites: cache,
         nativeOrderOverrides,
     };
@@ -344,13 +392,14 @@ export function exportFavoritesJson(): string {
 export async function clearLocalFavorites(): Promise<void> {
     cache = {};
     nativeOrderOverrides = {};
-    notifyListeners();
-    await persist();
+    notifyListeners("local");
+    await persist("local");
 }
 
 export function resetCache(): void {
     cache = {};
     nativeOrderOverrides = {};
+    lastUpdatedAt = 0;
     loaded = false;
     currentUserId = null;
 }

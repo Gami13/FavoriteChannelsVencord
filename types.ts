@@ -17,6 +17,13 @@ export type FavoriteChannelMap = Record<string, LocalFavoriteChannel>;
 
 export interface StoredFavoritesPayload {
     version: 1;
+    updatedAt?: number;
     favorites: FavoriteChannelMap;
     nativeOrderOverrides?: Record<string, number>;
+}
+
+export interface SyncFileDocument {
+    version: 1;
+    updatedAt: number;
+    accounts: Record<string, StoredFavoritesPayload>;
 }
